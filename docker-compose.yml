@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend
+  api:
+    build:
+      context: ./backend
+      dockerfile: app/Dockerfile
+    container_name: solverai-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app
+      - ./backend/documents:/documents
+      - ./data:/data
+    environment:
+      - DEBUG=${DEBUG:-True}
+      - HOST=0.0.0.0
+      - PORT=8000
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-solverai}
+      - POSTGRES_USER=${POSTGRES_USER:-solverai}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-solverai}
+    depends_on:
+      - postgres
+    networks:
+      - solverai-network
+    restart: unless-stopped
+
+  # Ollama for Local LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: solverai-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - solverai-network
+    restart: unless-stopped
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # PostgreSQL for persistent storage
+  postgres:
+    image: postgres:16-alpine
+    container_name: solverai-postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-solverai}
+      - POSTGRES_USER=${POSTGRES_USER:-solverai}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-solverai}
+    networks:
+      - solverai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U solverai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: solverai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - solverai-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Optional: Qdrant as alternative to FAISS (more scalable)
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   container_name: solverai-qdrant
+  #   ports:
+  #     - "6333:6333"
+  #   volumes:
+  #     - qdrant-data:/qdrant/storage
+  #   networks:
+  #     - solverai-network
+  #   restart: unless-stopped
+
+volumes:
+  ollama-data:
+  postgres-data:
+  redis-data:
+  # qdrant-data:
+
+networks:
+  solverai-network:
+    driver: bridge

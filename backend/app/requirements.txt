@@ -1,0 +1,40 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Configuration
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
+psycopg2-binary==2.9.9
+
+# Redis
+redis==5.0.1
+hiredis==2.3.2
+
+# LLM and AI (core only for now)
+httpx==0.25.2
+ollama==0.1.6
+
+# Basic utilities
+requests==2.31.0
+aiofiles==23.2.1
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+gunicorn==21.2.0
+
+# RAG
+langchain==0.1.0
+langchain-community==0.0.10
+faiss-cpu==1.7.4
+sentence-transformers==2.2.2
+pypdf==3.17.1
+
