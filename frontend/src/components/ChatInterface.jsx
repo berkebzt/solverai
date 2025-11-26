@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Mic, Square, Volume2 } from 'lucide-react';
+import { Send, Bot, User } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -88,7 +89,13 @@ const ChatInterface = ({ selectedDocuments = [], documents = [] }) => {
               )}
             </div>
             <div className={`message-bubble ${msg.role}`}>
-              <p>{msg.content}</p>
+              {msg.role === 'assistant' ? (
+                <div className="markdown-content">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <p>{msg.content}</p>
+              )}
             </div>
           </div>
         ))}
