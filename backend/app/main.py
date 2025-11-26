@@ -1,6 +1,14 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    UploadFile,
+    File,
+    Form,
+    BackgroundTasks,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +22,11 @@ import os
 from config import settings
 from database import init_db, close_db, get_db
 from models.conversation import Conversation, Message
+from models.document import Document
 from services.llm_service import llm_service
 from services.rag_service import rag_service
+from services.document_service import document_service
+from services.voice_service import voice_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -58,12 +69,21 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     stream: bool = False
+    document_ids: Optional[List[str]] = None
+
+
+class SourceDocument(BaseModel):
+    document_id: Optional[str]
+    chunk_index: Optional[int]
+    source_path: Optional[str]
+    preview: Optional[str]
 
 
 class ChatResponse(BaseModel):
     response: str
     conversation_id: str
     timestamp: str
+    sources: Optional[List[SourceDocument]] = None
 
 
 class ConversationResponse(BaseModel):
@@ -72,6 +92,34 @@ class ConversationResponse(BaseModel):
     messages: List[dict]
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentResponse(BaseModel):
+    id: str
+    original_filename: str
+    stored_filename: str
+    content_type: Optional[str]
+    size_bytes: Optional[int]
+    status: str
+    chunk_count: int
+    error: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    ingested_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
+    language: Optional[str]
+    duration_seconds: Optional[float]
+
+
+class SpeechRequest(BaseModel):
+    text: str
+    voice: Optional[str] = None
 
 
 @app.get("/")
@@ -157,17 +205,45 @@ async def chat(
                 0,
                 {
                     "role": "system",
-                    "content": "You are a helpful AI assistant. Be concise, friendly, and accurate.",
+                    "content": """You are SolverAI, a helpful and knowledgeable assistant.
+
+Guidelines for your responses:
+- Be clear, accurate, and well-structured
+- Use markdown formatting for better readability:
+  - Use **bold** for important terms or emphasis
+  - Use bullet points or numbered lists for steps or multiple items
+  - Use headings (## or ###) for organizing longer responses
+  - Use `code` formatting for technical terms, commands, or code
+- Keep paragraphs concise and separated
+- When providing steps or instructions, number them clearly
+- Be friendly but professional in tone
+- If you don't know something, say so honestly""",
                 },
             )
 
         # Retrieve context if RAG is enabled
         context = None
+        context_sources: List[SourceDocument] = []
         if settings.rag_enabled:
-            docs = rag_service.retrieve(request.message)
+            docs = rag_service.retrieve(
+                request.message, document_ids=request.document_ids
+            )
             if docs:
                 context = "\n".join([doc.page_content for doc in docs])
-                logger.info(f"Retrieved {len(docs)} documents for context")
+                context_sources = [
+                    SourceDocument(
+                        document_id=doc.metadata.get("document_id"),
+                        chunk_index=doc.metadata.get("chunk_index"),
+                        source_path=doc.metadata.get("source"),
+                        preview=doc.page_content[:200],
+                    )
+                    for doc in docs
+                ]
+                logger.info(
+                    "Retrieved %s documents for context (filtered=%s)",
+                    len(docs),
+                    bool(request.document_ids),
+                )
 
         # Generate response
         if request.stream:
@@ -184,6 +260,7 @@ async def chat(
                     conversation_id=conv_id,
                     role="assistant",
                     content=full_response,
+                    meta={"sources": [source.model_dump() for source in context_sources]},
                 )
                 db.add(assistant_message)
                 await db.commit()
@@ -207,6 +284,7 @@ async def chat(
                 conversation_id=conv_id,
                 role="assistant",
                 content=llm_response,
+                meta={"sources": [source.model_dump() for source in context_sources]},
             )
             db.add(assistant_message)
             await db.commit()
@@ -215,6 +293,7 @@ async def chat(
                 response=llm_response,
                 conversation_id=conv_id,
                 timestamp=datetime.now().isoformat(),
+                sources=context_sources or None,
             )
 
     except Exception as e:
@@ -222,33 +301,59 @@ async def chat(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/upload")
+@app.post("/upload", response_model=DocumentResponse)
 async def upload_document(
     file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
 ):
     """Upload a document for RAG ingestion"""
+    allowed_types = {"application/pdf", "text/plain"}
+    ext = os.path.splitext(file.filename.lower())[-1]
+    if file.content_type not in allowed_types and ext not in {".pdf", ".txt"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file format. Only PDF and TXT are supported.",
+        )
+
+    document_id = str(uuid.uuid4())
+    stored_filename = document_service.build_stored_filename(document_id, file.filename)
+    storage_path = os.path.join(settings.absolute_documents_dir, stored_filename)
+
+    document = Document(
+        id=document_id,
+        original_filename=file.filename,
+        stored_filename=stored_filename,
+        storage_path=storage_path,
+        content_type=file.content_type,
+        status="pending",
+    )
+    db.add(document)
+    await db.flush()
+
     try:
-        # Create documents directory if it doesn't exist
-        os.makedirs("documents", exist_ok=True)
-        
-        file_path = f"documents/{file.filename}"
-        
-        # Save file
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-            
-        # Ingest file
-        chunks = await rag_service.ingest_file(file_path)
-        
-        return {
-            "message": "File uploaded and ingested successfully",
-            "filename": file.filename,
-            "chunks": chunks
-        }
+        saved_path, size_bytes = await document_service.save_upload(
+            file, stored_filename
+        )
+        document.storage_path = saved_path
+        document.size_bytes = size_bytes
+        document.status = "processing"
+        await db.commit()
+
+        chunks = await rag_service.ingest_file(saved_path, document.id)
+        document.chunk_count = chunks
+        document.status = "ready"
+        document.ingested_at = datetime.utcnow()
+        document.error = None
+        await db.commit()
     except Exception as e:
+        document.status = "error"
+        document.error = str(e)
+        await db.commit()
         logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    await db.refresh(document)
+    return document
 
 
 @app.get("/conversations/{conversation_id}", response_model=ConversationResponse)
@@ -337,3 +442,127 @@ async def delete_conversation(
     await db.commit()
 
     return {"message": "Conversation deleted successfully"}
+
+
+@app.get("/documents", response_model=List[DocumentResponse])
+async def list_documents(
+    db: AsyncSession = Depends(get_db),
+):
+    """List all uploaded documents"""
+    result = await db.execute(
+        select(Document).order_by(Document.created_at.desc())
+    )
+    docs = result.scalars().all()
+    return docs
+
+
+@app.delete("/documents/{document_id}")
+async def delete_document_entry(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete document metadata, file, and vector entries"""
+    document = await db.get(Document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    removed_chunks = rag_service.remove_document(document_id)
+    document_service.remove_file(document.storage_path)
+    await db.delete(document)
+    await db.commit()
+
+    return {
+        "message": "Document deleted successfully",
+        "chunks_removed": removed_chunks,
+    }
+
+
+@app.post("/documents/{document_id}/reingest", response_model=DocumentResponse)
+async def reingest_document(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reprocess an existing document"""
+    document = await db.get(Document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if not os.path.exists(document.storage_path):
+        raise HTTPException(
+            status_code=400, detail="Stored file missing. Re-upload required."
+        )
+
+    try:
+        document.status = "processing"
+        await db.commit()
+
+        rag_service.remove_document(document_id)
+        chunks = await rag_service.ingest_file(document.storage_path, document_id)
+
+        document.chunk_count = chunks
+        document.status = "ready"
+        document.ingested_at = datetime.utcnow()
+        document.updated_at = datetime.utcnow()
+        document.error = None
+        await db.commit()
+    except Exception as e:
+        document.status = "error"
+        document.error = str(e)
+        await db.commit()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    await db.refresh(document)
+    return document
+
+
+@app.post("/voice/transcribe", response_model=TranscriptionResponse)
+async def transcribe_audio(
+    audio: UploadFile = File(...),
+    language: Optional[str] = Form(None),
+):
+    """Transcribe audio locally with Whisper"""
+    if audio.content_type and not audio.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="File must be an audio format")
+
+    tmp_name = f"transcribe_{uuid.uuid4()}.tmp"
+    tmp_path = os.path.join(settings.absolute_audio_dir, tmp_name)
+    os.makedirs(settings.absolute_audio_dir, exist_ok=True)
+
+    try:
+        contents = await audio.read()
+        with open(tmp_path, "wb") as f:
+            f.write(contents)
+
+        text, detected_language, duration = await voice_service.transcribe(
+            tmp_path, language=language
+        )
+        return TranscriptionResponse(
+            text=text,
+            language=language or detected_language,
+            duration_seconds=duration,
+        )
+    finally:
+        voice_service.cleanup_audio(tmp_path)
+
+
+@app.post("/voice/speak")
+async def synthesize_speech(
+    request: SpeechRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Convert text to speech locally"""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required for speech")
+
+    audio_path = await voice_service.synthesize(
+        request.text.strip(), voice=request.voice
+    )
+
+    background_tasks.add_task(voice_service.cleanup_audio, audio_path)
+
+    filename = f"synthesis_{uuid.uuid4()}.wav"
+    return FileResponse(
+        audio_path,
+        media_type="audio/wav",
+        filename=filename,
+    )

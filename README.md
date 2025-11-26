@@ -6,9 +6,10 @@ A privacy-focused AI companion that you can run locally or in the cloud. Built w
 
 - 🤖 **Local LLM Support** - Run Llama 3.1 (8B) locally via Ollama
 - 📚 **Document Chat (RAG)** - Chat with your documents using FAISS vector database
+- 🗂️ **Document Workspace** - Local library with ingestion status, reprocessing, and deletion controls
 - 🧠 **Persistent Memory** - Conversation history stored in PostgreSQL
-- 🎤 **Voice Input** - Speech-to-text with OpenAI Whisper
-- 🔊 **Voice Output** - Text-to-speech capabilities
+- 🎤 **Voice Input** - Local speech-to-text via Whisper (faster-whisper)
+- 🔊 **Voice Output** - Offline text-to-speech playback
 - 🛠️ **AI Agents** - Modular agents for search, code execution, and calendar
 - 🔒 **Privacy First** - Run completely offline if desired
 - 🐳 **Docker Ready** - Easy deployment with Docker Compose
@@ -70,6 +71,9 @@ A privacy-focused AI companion that you can run locally or in the cloud. Built w
 - `POST /chat` - Send a chat message
 - `GET /conversations/{id}` - Retrieve conversation history
 - `POST /upload` - Upload documents for RAG
+- `GET /documents` - List ingested documents and status
+- `DELETE /documents/{id}` - Remove document and its embeddings
+- `POST /documents/{id}/reingest` - Rebuild embeddings for a document
 - `POST /voice/transcribe` - Transcribe audio to text
 - `POST /voice/speak` - Convert text to speech
 

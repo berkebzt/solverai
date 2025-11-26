@@ -49,7 +49,8 @@ async def get_db():
 
 async def init_db():
     """Initialize database tables"""
-    from models.conversation import Base
+    from models.base import Base
+    from models import conversation, document  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

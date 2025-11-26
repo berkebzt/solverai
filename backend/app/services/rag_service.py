@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
@@ -44,7 +44,7 @@ class RagService:
             logger.error(f"Error initializing vector store: {e}")
             self.vector_store = None
 
-    async def ingest_file(self, file_path: str) -> int:
+    async def ingest_file(self, file_path: str, document_id: str) -> int:
         """
         Ingest a file into the vector store
 
@@ -68,50 +68,32 @@ class RagService:
 
             # Split text
             chunks = self.text_splitter.split_documents(documents)
+            for idx, chunk in enumerate(chunks):
+                if chunk.metadata is None:
+                    chunk.metadata = {}
+                chunk.metadata.update(
+                    {
+                        "document_id": document_id,
+                        "source": file_path,
+                        "chunk_index": idx,
+                    }
+                )
 
             if not chunks:
                 logger.warning("No text chunks found in document")
                 return 0
 
             # Add to vector store
+            ids = [self._build_chunk_id(document_id, idx) for idx in range(len(chunks))]
+
             if self.vector_store is None:
                 logger.info("Creating new vector store from documents")
-                
-                # Manually embed to ensure numpy array
-                texts = [d.page_content for d in chunks]
-                metadatas = [d.metadata for d in chunks]
-                embeddings_list = self.embeddings.embed_documents(texts)
-                
-                import numpy as np
-                import faiss
-                from langchain_community.docstore.in_memory import InMemoryDocstore
-                
-                # Convert to numpy
-                embeddings = np.array(embeddings_list, dtype=np.float32)
-                
-                # Create index
-                dimension = embeddings.shape[1]
-                index = faiss.IndexFlatL2(dimension)
-                index.add(embeddings)
-                
-                # Create docstore
-                docstore = InMemoryDocstore()
-                index_to_docstore_id = {}
-                for i, (text, meta) in enumerate(zip(texts, metadatas)):
-                    doc = Document(page_content=text, metadata=meta)
-                    docstore.add({str(i): doc})
-                    index_to_docstore_id[i] = str(i)
-                    
-                # Create FAISS store
-                self.vector_store = FAISS(
-                    embedding_function=self.embeddings,
-                    index=index,
-                    docstore=docstore,
-                    index_to_docstore_id=index_to_docstore_id
+                self.vector_store = FAISS.from_documents(
+                    chunks, self.embeddings, ids=ids
                 )
             else:
                 logger.info("Adding documents to existing vector store")
-                self.vector_store.add_documents(chunks)
+                self.vector_store.add_documents(chunks, ids=ids)
 
             # Save vector store
             self._save_vector_store()
@@ -123,7 +105,9 @@ class RagService:
             logger.error(f"Error ingesting file {file_path}: {e}")
             raise
 
-    def retrieve(self, query: str, k: int = 3) -> List[Document]:
+    def retrieve(
+        self, query: str, k: int = 3, document_ids: Optional[Sequence[str]] = None
+    ) -> List[Document]:
         """
         Retrieve relevant documents for a query
 
@@ -139,8 +123,16 @@ class RagService:
             return []
 
         try:
-            docs = self.vector_store.similarity_search(query, k=k)
-            return docs
+            docs = self.vector_store.similarity_search(query, k=max(k * 2, k))
+            selected_ids = set(document_ids) if document_ids else None
+            if selected_ids:
+                filtered = [
+                    doc
+                    for doc in docs
+                    if doc.metadata.get("document_id") in selected_ids
+                ]
+                return filtered[:k]
+            return docs[:k]
         except Exception as e:
             logger.error(f"Error retrieving documents: {e}")
             return []
@@ -151,6 +143,33 @@ class RagService:
             os.makedirs(self.vector_db_path, exist_ok=True)
             self.vector_store.save_local(self.vector_db_path)
             logger.info(f"Saved vector store to {self.vector_db_path}")
+
+    def _build_chunk_id(self, document_id: str, chunk_idx: int) -> str:
+        return f"{document_id}_{chunk_idx}"
+
+    def remove_document(self, document_id: str) -> int:
+        """Remove all chunks for a document from the vector store."""
+        if not self.vector_store:
+            return 0
+
+        docstore = getattr(self.vector_store, "docstore", None)
+        if not docstore or not hasattr(docstore, "_dict"):
+            logger.warning("Vector store docstore not available for deletion")
+            return 0
+
+        ids_to_remove = [
+            doc_id
+            for doc_id, doc in docstore._dict.items()
+            if doc.metadata.get("document_id") == document_id
+        ]
+
+        if not ids_to_remove:
+            return 0
+
+        self.vector_store.delete(ids_to_remove)
+        self._save_vector_store()
+        logger.info(f"Removed {len(ids_to_remove)} chunks for document {document_id}")
+        return len(ids_to_remove)
 
 
 # Create singleton instance

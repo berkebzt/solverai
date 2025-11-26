@@ -38,3 +38,7 @@ faiss-cpu==1.7.4
 sentence-transformers==2.2.2
 pypdf==3.17.1
 
+# Voice
+faster-whisper==0.10.0
+pyttsx3==2.90
+

@@ -2,6 +2,9 @@
 
 Complete guide for deploying SolverAI to Google Cloud Platform with GPU-enabled LLM support.
 
+> **Only open-source models?**  
+> Follow `deploy/gcp/OPEN_SOURCE.md` for a step-by-step runbook that keeps every feature cost-free from an API standpoint (Ollama on Compute Engine, no OpenAI fallback).
+
 ## Architecture Overview
 
 ```
@@ -86,6 +89,9 @@ chmod +x deploy.sh
 See detailed steps below.
 
 ## Detailed Deployment Steps
+
+> **Need an open-source-only plan?**  
+> Jump to `OPEN_SOURCE.md` for an opinionated walkthrough that never touches paid APIs.
 
 ### Step 1: Enable Required APIs
 

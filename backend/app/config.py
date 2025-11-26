@@ -27,13 +27,25 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.1:8b"
     openai_api_key: Optional[str] = None
 
-    # Vector Database
+    # Vector Database & Documents
     custom_vector_db_path: str = "local_data/vector_db"
+    documents_dir: str = "documents"
+    audio_temp_dir: str = "local_data/audio"
     
     @property
     def absolute_vector_db_path(self) -> str:
         import os
         return os.path.abspath(self.custom_vector_db_path)
+
+    @property
+    def absolute_documents_dir(self) -> str:
+        import os
+        return os.path.abspath(self.documents_dir)
+
+    @property
+    def absolute_audio_dir(self) -> str:
+        import os
+        return os.path.abspath(self.audio_temp_dir)
 
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -56,13 +68,19 @@ class Settings(BaseSettings):
         case_sensitive = False
         extra = "ignore"
 
+    # Local dev uses SQLite by default; set USE_POSTGRES=true for Postgres
+    use_postgres: bool = False
+
     @property
     def database_url(self) -> str:
-        """PostgreSQL database URL"""
+        """Database URL – SQLite for local dev, Postgres for production"""
         import os
         if os.getenv("DATABASE_URL"):
             return os.getenv("DATABASE_URL")
-        return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        if self.use_postgres:
+            return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        # SQLite async via aiosqlite
+        return "sqlite+aiosqlite:///./solverai.db"
 
     @property
     def redis_url(self) -> str:

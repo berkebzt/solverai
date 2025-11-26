@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Send, Bot, User, Mic, Square, Volume2 } from 'lucide-react';
 
-const ChatInterface = () => {
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
+const ChatInterface = ({ selectedDocuments = [], documents = [] }) => {
   const [messages, setMessages] = useState([
     { role: 'assistant', content: 'Hello! I am SolverAI. How can I assist you today?' }
   ]);
@@ -11,7 +12,7 @@ const ChatInterface = () => {
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(scrollToBottom, [messages]);
@@ -22,14 +23,16 @@ const ChatInterface = () => {
 
     const userMessage = input;
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
     try {
-      const response = await fetch('/chat', {
+      const payload = { message: userMessage, stream: true, document_ids: selectedDocuments };
+
+      const response = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage, stream: true }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) throw new Error('Network response was not ok');
@@ -38,7 +41,7 @@ const ChatInterface = () => {
       const decoder = new TextDecoder();
       let assistantMessage = '';
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -46,14 +49,14 @@ const ChatInterface = () => {
 
         const chunk = decoder.decode(value);
         const lines = chunk.split('\n');
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') break;
-            
+
             assistantMessage += data;
-            setMessages(prev => {
+            setMessages((prev) => {
               const newMessages = [...prev];
               newMessages[newMessages.length - 1].content = assistantMessage;
               return newMessages;
@@ -63,78 +66,70 @@ const ChatInterface = () => {
       }
     } catch (error) {
       console.error('Error:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error.' }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
+      ]);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-full relative">
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        <AnimatePresence>
-          {messages.map((msg, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-            >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                msg.role === 'assistant' 
-                  ? 'bg-gradient-to-br from-cyan-500 to-blue-600 shadow-[0_0_15px_rgba(0,240,255,0.3)]' 
-                  : 'bg-white/10'
-              }`}>
-                {msg.role === 'assistant' ? <Bot size={20} color="white" /> : <User size={20} color="white" />}
-              </div>
-              
-              <div className={`max-w-[80%] p-4 rounded-2xl ${
-                msg.role === 'assistant'
-                  ? 'glass text-gray-100 rounded-tl-none'
-                  : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-tr-none shadow-lg'
-              }`}>
-                <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        
-        {isLoading && messages[messages.length - 1].role === 'user' && (
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }}
-            className="flex gap-4"
-          >
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
-              <Loader size={20} className="animate-spin text-white" />
+    <div className="chat-container">
+      <div className="chat-messages">
+        {messages.map((msg, idx) => (
+          <div key={idx} className={`message-row ${msg.role}`}>
+            <div className={`message-avatar ${msg.role}`}>
+              {msg.role === 'assistant' ? (
+                <Bot size={18} color="white" />
+              ) : (
+                <User size={18} color="white" />
+              )}
             </div>
-            <div className="glass p-4 rounded-2xl rounded-tl-none flex items-center gap-2">
-              <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></span>
-              <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-              <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
+            <div className={`message-bubble ${msg.role}`}>
+              <p>{msg.content}</p>
             </div>
-          </motion.div>
+          </div>
+        ))}
+
+        {isLoading && messages[messages.length - 1]?.role === 'user' && (
+          <div className="message-row assistant">
+            <div className="message-avatar assistant">
+              <Bot size={18} color="white" />
+            </div>
+            <div className="typing-indicator">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </div>
+          </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-6 glass-panel mt-auto border-t border-white/10">
-        <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask anything..."
-            className="w-full bg-black/30 border border-white/10 rounded-xl py-4 pl-6 pr-14 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50 focus:shadow-[0_0_20px_rgba(0,240,255,0.1)] transition-all"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isLoading}
-            className="absolute right-2 top-2 p-2 bg-cyan-500/20 hover:bg-cyan-500 rounded-lg text-cyan-400 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send size={20} />
-          </button>
-        </form>
+      <div className="chat-input-wrapper">
+        <div className="chat-input-container">
+          <form onSubmit={handleSubmit}>
+            <div className="input-row">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask anything..."
+                className="chat-input"
+              />
+              <button
+                type="submit"
+                disabled={!input.trim() || isLoading}
+                className="send-btn"
+              >
+                <Send size={18} />
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );

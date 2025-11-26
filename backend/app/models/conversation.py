@@ -1,10 +1,8 @@
 from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Integer, JSON
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 import uuid
-
-Base = declarative_base()
+from .base import Base
 
 
 class Conversation(Base):

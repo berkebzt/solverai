@@ -36,9 +36,9 @@ gcloud config set project $PROJECT_ID
 # Ask deployment type
 echo "🎯 Deployment Options"
 echo "===================="
-echo "1) Full deployment (Cloud Run + Cloud SQL + Redis + GPU VM for Ollama) - ~\$270-410/month"
-echo "2) Cost-effective (Cloud Run + Cloud SQL + Redis + OpenAI API) - ~\$70-100/month"
-echo "3) Minimal (Cloud Run + OpenAI API only) - ~\$15-30/month"
+echo "1) Full open-source (Cloud Run + Cloud SQL + Redis + GPU VM for Ollama) - infrastructure only"
+echo "2) Cost-effective (Cloud Run + Cloud SQL + Redis + OpenAI API) - adds OpenAI usage costs"
+echo "3) Minimal (Cloud Run + OpenAI API only) - OpenAI usage costs apply"
 echo ""
 read -p "Select deployment type (1-3): " DEPLOY_TYPE
 

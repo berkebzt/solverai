@@ -1,15 +1,24 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Layout from './components/Layout';
 import ChatInterface from './components/ChatInterface';
-import RagUpload from './components/RagUpload';
+import DocumentWorkspace from './components/DocumentWorkspace';
 
 function App() {
+  const [documents, setDocuments] = useState([]);
+  const [selectedDocuments, setSelectedDocuments] = useState([]);
+
   return (
     <Layout>
-      <div className="relative h-full">
-        <RagUpload />
-        <ChatInterface />
-      </div>
+      <DocumentWorkspace
+        documents={documents}
+        onDocumentsChange={setDocuments}
+        selectedDocuments={selectedDocuments}
+        onSelectionChange={setSelectedDocuments}
+      />
+      <ChatInterface
+        selectedDocuments={selectedDocuments}
+        documents={documents}
+      />
     </Layout>
   );
 }
